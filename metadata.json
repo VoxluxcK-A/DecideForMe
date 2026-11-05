@@ -1,0 +1,6 @@
+{
+  "name": "Decide For Me",
+  "description": "A private decision-making app with categories, random choices, favorites, history, and optional AI-written decision perspectives.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
