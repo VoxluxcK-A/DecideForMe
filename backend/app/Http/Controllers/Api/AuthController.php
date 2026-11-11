@@ -32,6 +32,14 @@ class AuthController extends Controller
             ]);
         }
 
+        if (! $request->user()->is_active) {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return response()->json(['message' => 'This account has been deactivated. Contact an administrator.'], 403);
+        }
+
         $request->session()->regenerate();
 
         return response()->json(['data' => $this->userPayload($request->user())]);
@@ -57,6 +65,9 @@ class AuthController extends Controller
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
+            'role' => $user->role,
+            'isAdmin' => $user->isAdmin(),
+            'isActive' => $user->is_active,
         ];
     }
 }

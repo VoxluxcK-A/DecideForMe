@@ -62,6 +62,62 @@ class DecisionController extends Controller
         ], 201);
     }
 
+    public function replace(Request $request, DecisionHistory $history): JsonResponse
+    {
+        abort_unless($history->user_id === $request->user()->id, 404);
+
+        $validated = $request->validate([
+            'option_id' => ['required', 'integer', 'min:1'],
+            'favorites_only' => ['required', 'boolean'],
+        ]);
+
+        $user = $request->user();
+        $result = DB::transaction(function () use ($history, $user, $validated) {
+            $options = DecisionOption::query()
+                ->where('is_excluded', false)
+                ->whereHas('category', fn ($query) => $query->where('user_id', $user->id));
+
+            if ($validated['favorites_only']) {
+                $options->where('is_favorite', true);
+            } else {
+                $options->where('category_id', $history->category_id);
+            }
+
+            $option = $options->lockForUpdate()->find($validated['option_id']);
+            if (! $option || $option->id === $history->selected_option_id) {
+                abort(422, 'Choose another available option.');
+            }
+
+            $option->load('category:id,name');
+            $history->refresh();
+            if ($history->status === 'pending') {
+                $history->update(['status' => 'skipped']);
+            }
+
+            $newHistory = $user->decisionHistories()->create([
+                'category_id' => $option->category_id,
+                'category_name' => $option->category?->name ?? 'Uncategorized',
+                'selected_option_id' => $option->id,
+                'selected_option_name' => $option->name,
+                'status' => 'pending',
+            ]);
+
+            return [
+                'option' => $option,
+                'history' => $newHistory,
+                'replaced_history' => $history->fresh(),
+            ];
+        });
+
+        return response()->json([
+            'data' => [
+                'option' => DashboardController::optionPayload($result['option']),
+                'history' => DashboardController::historyPayload($result['history']),
+                'replacedHistory' => DashboardController::historyPayload($result['replaced_history']),
+            ],
+        ], 201);
+    }
+
     public function history(Request $request): JsonResponse
     {
         $query = $request->user()->decisionHistories()->latest();

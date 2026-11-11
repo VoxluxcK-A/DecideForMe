@@ -23,10 +23,11 @@ import {
   Shuffle,
   Sparkles,
   Trash2,
+  Users,
   X,
 } from 'lucide-react';
 import type { DecisionCategory, DecisionData, DecisionOption, DecisionView, DecisionStatus } from './decisions/model';
-import { ApiError, decisionApi, getApiErrorMessage, type ApiDashboard, type AuthUser } from './decisions/api';
+import { ApiError, decisionApi, getApiErrorMessage, type AdminUser, type ApiDashboard, type AuthUser } from './decisions/api';
 
 type SortOrder = 'recent' | 'alphabetical';
 type EditorState = { type: 'category' | 'option'; id?: string; categoryId?: string } | null;
@@ -39,6 +40,7 @@ const navigation: { id: DecisionView; label: string; icon: typeof LayoutDashboar
   { id: 'options', label: 'All options', icon: ListChecks },
   { id: 'favorites', label: 'Favorites', icon: Heart },
   { id: 'history', label: 'History', icon: History },
+  { id: 'admin', label: 'User management', icon: Users },
 ];
 
 function Brand() {
@@ -210,7 +212,7 @@ function EmptyState({ title, copy, action, onAction }: { title: string; copy: st
   );
 }
 
-export default function DecisionDashboard() {
+export default function DecisionDashboard({ initialView = 'overview' }: { initialView?: DecisionView }) {
   const [data, setData] = useState<DecisionData>({ version: 1, categories: [], options: [], history: [] });
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -221,7 +223,16 @@ export default function DecisionDashboard() {
   const [historyPage, setHistoryPage] = useState(1);
   const [historyLastPage, setHistoryLastPage] = useState(1);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const [view, setView] = useState<DecisionView>('overview');
+  const [view, setView] = useState<DecisionView>(initialView);
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [adminUsersLoading, setAdminUsersLoading] = useState(false);
+  const [adminUsersError, setAdminUsersError] = useState('');
+  const [adminRetryKey, setAdminRetryKey] = useState(0);
+  const [adminSearchInput, setAdminSearchInput] = useState('');
+  const [adminSearch, setAdminSearch] = useState('');
+  const [adminPage, setAdminPage] = useState(1);
+  const [adminLastPage, setAdminLastPage] = useState(1);
+  const [updatingAdminUserId, setUpdatingAdminUserId] = useState<number | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [editor, setEditor] = useState<EditorState>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
@@ -232,6 +243,9 @@ export default function DecisionDashboard() {
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [resultOption, setResultOption] = useState<DecisionOption | null>(null);
   const [resultHistoryId, setResultHistoryId] = useState('');
+  const [choosingAnother, setChoosingAnother] = useState(false);
+  const [replacingDecision, setReplacingDecision] = useState(false);
+  const [updatingHistory, setUpdatingHistory] = useState<{ id: string; status: DecisionStatus } | null>(null);
   const [lastDecisionMessage, setLastDecisionMessage] = useState('');
   const [situation, setSituation] = useState('');
   const [reasonLoadingId, setReasonLoadingId] = useState('');
@@ -240,17 +254,28 @@ export default function DecisionDashboard() {
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    document.title = 'Your decision space — Decide For Me';
+    document.title = user?.isAdmin ? 'User management — Decide For Me' : 'Your decision space — Decide For Me';
+  }, [user?.isAdmin]);
+
+  useEffect(() => {
     let active = true;
-    Promise.all([decisionApi.dashboard(), decisionApi.currentUser()])
-      .then(([dashboard, currentUser]) => {
+    decisionApi.currentUser()
+      .then(async (currentUser) => {
+        if (!active) return;
+        setUser(currentUser);
+        if (currentUser.isAdmin) {
+          setView('admin');
+          setLoadFailed(false);
+          return;
+        }
+
+        const dashboard = await decisionApi.dashboard();
         if (!active) return;
         const { stats: dashboardStats, ...decisionData } = dashboard;
         dataRef.current = decisionData;
         setData(decisionData);
         setStats(dashboardStats);
         setHistoryLastPage(Math.max(1, Math.ceil(dashboardStats.decisions / 100)));
-        setUser(currentUser);
         setSelectedCategoryId(dashboard.categories[0]?.id ?? '');
         setLoadFailed(false);
       })
@@ -302,6 +327,39 @@ export default function DecisionDashboard() {
     setHistoryLastPage(Math.max(1, Math.ceil(stats.decisions / 100)));
   }, [stats.decisions]);
 
+  useEffect(() => {
+    if (view !== 'admin' || !user) return;
+    if (!user.isAdmin) {
+      window.location.replace('/decide');
+      return;
+    }
+
+    let active = true;
+    setAdminUsersLoading(true);
+    setAdminUsersError('');
+    decisionApi.adminUsers(adminSearch, adminPage)
+      .then((page) => {
+        if (!active) return;
+        setAdminUsers(page.data);
+        setAdminLastPage(page.meta.lastPage);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        if (error instanceof ApiError && error.status === 403) {
+          window.location.replace('/decide');
+          return;
+        }
+        setAdminUsersError(getApiErrorMessage(error));
+      })
+      .finally(() => {
+        if (active) setAdminUsersLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [adminPage, adminSearch, adminRetryKey, user, view]);
+
   const updateData = (update: (current: DecisionData) => DecisionData) => {
     const next = update(dataRef.current);
     dataRef.current = next;
@@ -312,13 +370,21 @@ export default function DecisionDashboard() {
     setLoading(true);
     setNotice(null);
     try {
-      const [dashboard, currentUser] = await Promise.all([decisionApi.dashboard(), decisionApi.currentUser()]);
+      const currentUser = await decisionApi.currentUser();
+      setUser(currentUser);
+      if (currentUser.isAdmin) {
+        setView('admin');
+        setLoadFailed(false);
+        setNotice(null);
+        return;
+      }
+
+      const dashboard = await decisionApi.dashboard();
       const { stats: dashboardStats, ...decisionData } = dashboard;
       dataRef.current = decisionData;
       setData(decisionData);
       setStats(dashboardStats);
       setHistoryLastPage(Math.max(1, Math.ceil(dashboardStats.decisions / 100)));
-      setUser(currentUser);
       setSelectedCategoryId((current) => current || dashboard.categories[0]?.id || '');
       setLoadFailed(false);
     } catch (error) {
@@ -460,6 +526,7 @@ export default function DecisionDashboard() {
     setFavoritesOnly(onlyFavorites);
     setResultOption(null);
     setResultHistoryId('');
+    setChoosingAnother(false);
     setReasonLoadingId('');
     setReasonError(null);
     setSpinning(true);
@@ -490,13 +557,62 @@ export default function DecisionDashboard() {
     }, 850);
   };
 
+  const chooseAlternative = async (option: DecisionOption) => {
+    if (!resultHistoryId || replacingDecision) return;
+    setReplacingDecision(true);
+    try {
+      const { option: savedOption, history, replacedHistory } = await decisionApi.replaceDecision(
+        resultHistoryId,
+        option.id,
+        favoritesOnly,
+      );
+      updateData((current) => ({
+        ...current,
+        options: current.options.map((item) => item.id === savedOption.id ? savedOption : item),
+        history: [history, ...current.history.map((item) => item.id === replacedHistory.id ? replacedHistory : item)],
+      }));
+      setStats((current) => ({ ...current, decisions: current.decisions + 1 }));
+      setResultOption(savedOption);
+      setResultHistoryId(history.id);
+      setChoosingAnother(false);
+      setLastDecisionMessage('You chose another option.');
+      setReasonError(null);
+      void requestAiReason(history.id, situation.trim());
+    } catch (error) {
+      announce(getApiErrorMessage(error), 'error');
+    } finally {
+      setReplacingDecision(false);
+    }
+  };
+
   const setHistoryStatus = async (id: string, status: DecisionStatus) => {
+    if (updatingHistory?.id === id) return;
+    setUpdatingHistory({ id, status });
     try {
       const saved = await decisionApi.updateHistoryStatus(id, status);
       updateData((current) => ({ ...current, history: current.history.map((item) => item.id === id ? saved : item) }));
       if (resultHistoryId === id) announce(status === 'completed' ? 'Decision marked as completed.' : 'Decision marked as skipped.');
     } catch (error) {
       announce(getApiErrorMessage(error), 'error');
+    } finally {
+      setUpdatingHistory((current) => current?.id === id ? null : current);
+    }
+  };
+
+  const setAdminUserActive = async (target: AdminUser) => {
+    const nextActive = !target.isActive;
+    const action = nextActive ? 'reactivate' : 'deactivate';
+    if (!window.confirm(`Are you sure you want to ${action} ${target.name}'s account?`)) return;
+
+    setUpdatingAdminUserId(target.id);
+    try {
+      const saved = await decisionApi.setAdminUserActive(target.id, nextActive);
+      setAdminUsers((current) => current.map((item) => item.id === saved.id ? saved : item));
+      announce(`${saved.name}'s account was ${nextActive ? 'reactivated' : 'deactivated'}.`);
+    } catch (error) {
+      announce(getApiErrorMessage(error), 'error');
+    } finally {
+      setUpdatingAdminUserId((current) => current === target.id ? null : current);
     }
   };
 
@@ -631,10 +747,10 @@ export default function DecisionDashboard() {
   return (
     <main className="dfm-dashboard">
       <aside className="dfm-dashboard-sidebar">
-        <div className="dfm-dashboard-brand"><Brand /><span>YOUR DECISION SPACE</span></div>
+        <div className="dfm-dashboard-brand"><Brand /><span>{user?.isAdmin ? 'ACCOUNT ADMINISTRATION' : 'YOUR DECISION SPACE'}</span></div>
         <nav className="dfm-dashboard-nav" aria-label="Application navigation">
-          <span className="dfm-dashboard-nav-label">WORKSPACE</span>
-          {navigation.map(({ id, label, icon: Icon }) => (
+          <span className="dfm-dashboard-nav-label">{user?.isAdmin ? 'ADMINISTRATION' : 'WORKSPACE'}</span>
+          {navigation.filter(({ id }) => user?.isAdmin ? id === 'admin' : id !== 'admin').map(({ id, label, icon: Icon }) => (
             <button type="button" key={id} className={view === id ? 'is-active' : ''} onClick={() => setView(id)} aria-current={view === id ? 'page' : undefined}>
               <Icon size={17} strokeWidth={1.7} /><span>{label}</span>
               {id === 'favorites' && stats.favorites > 0 && <i>{stats.favorites}</i>}
@@ -642,7 +758,7 @@ export default function DecisionDashboard() {
           ))}
         </nav>
         <div className="dfm-dashboard-sidebar-bottom">
-          <div className="dfm-storage-note"><span><CheckCircle2 size={14} /></span><p>Your choices are saved to your private account and ready on your next visit.</p></div>
+          <div className="dfm-storage-note"><span><CheckCircle2 size={14} /></span><p>{user?.isAdmin ? 'Manage account access while keeping users’ decision data private.' : 'Your choices are saved to your private account and ready on your next visit.'}</p></div>
           <a href="/home" className="dfm-dashboard-back"><ArrowLeft size={15} /> Back to the site</a>
           <button type="button" className="dfm-dashboard-back dfm-dashboard-logout" onClick={logout}>Sign out</button>
         </div>
@@ -665,7 +781,7 @@ export default function DecisionDashboard() {
           {loading && <div className="dfm-dash-loading" role="status"><span /> Loading your decision space…</div>}
           {!loading && loadFailed && (
             <div className="dfm-dash-load-error" role="alert">
-              <span>We couldn’t load your saved choices. Your data is still safe.</span>
+              <span>We couldn’t load your account. Your data is still safe.</span>
               <button type="button" className="dfm-dash-button dfm-dash-button-dark" onClick={() => void retryLoad()}>Try again</button>
             </div>
           )}
@@ -710,6 +826,69 @@ export default function DecisionDashboard() {
                 <button type="button" onClick={goToDecision}><Shuffle size={17} /> Start choosing <ArrowUpRight size={14} /></button>
               </section>
             </>
+          )}
+
+          {!loading && view === 'admin' && user?.isAdmin && (
+            <section className="dfm-dash-page">
+              <div className="dfm-dash-page-heading">
+                <div><div className="dfm-kicker"><i /> ADMINISTRATION</div><h1>User accounts<span>.</span></h1><p>View accounts and control access. Personal decision data is not shown here.</p></div>
+              </div>
+              <section className="dfm-dash-panel dfm-admin-users-panel">
+                <div className="dfm-dash-panel-head">
+                  <div><span className="dfm-dash-eyebrow">ACCOUNT ACCESS</span><h2>Registered users</h2></div>
+                  <span className="dfm-admin-users-count">{adminUsersLoading ? 'Loading…' : `${adminUsers.length} shown`}</span>
+                </div>
+                <form className="dfm-dash-toolbar dfm-admin-search" onSubmit={(event) => {
+                  event.preventDefault();
+                  setAdminPage(1);
+                  setAdminSearch(adminSearchInput.trim());
+                }}>
+                  <label className="dfm-dash-search">
+                    <Search size={16} />
+                    <input value={adminSearchInput} onChange={(event) => setAdminSearchInput(event.target.value)} placeholder="Search name or email…" />
+                  </label>
+                  <button type="submit" className="dfm-dash-button dfm-dash-button-dark">Search</button>
+                </form>
+                {adminUsersLoading ? (
+                  <div className="dfm-dash-loading" role="status"><span /> Loading user accounts…</div>
+                ) : adminUsersError ? (
+                  <div className="dfm-dash-load-error" role="alert">
+                    <span>{adminUsersError}</span>
+                    <button type="button" className="dfm-dash-button dfm-dash-button-dark" onClick={() => setAdminRetryKey((current) => current + 1)}>Try again</button>
+                  </div>
+                ) : adminUsers.length ? (
+                  <>
+                    <div className="dfm-admin-user-list" aria-label="Registered user accounts">
+                      {adminUsers.map((target) => (
+                        <article className="dfm-admin-user-row" key={target.id}>
+                          <div className="dfm-admin-user-identity"><strong>{target.name}</strong><span>{target.email}</span></div>
+                          <span className={`dfm-admin-role dfm-admin-role-${target.role}`}>{target.role}</span>
+                          <span className={`dfm-admin-account-status${target.isActive ? ' is-active' : ''}`}>{target.isActive ? 'Active' : 'Deactivated'}</span>
+                          <span className="dfm-admin-user-date">Joined {formatDate(target.createdAt)}</span>
+                          {target.role === 'user' ? (
+                            <button
+                              type="button"
+                              className={`dfm-dash-button ${target.isActive ? 'dfm-dash-button-quiet' : 'dfm-dash-button-dark'}`}
+                              disabled={updatingAdminUserId === target.id}
+                              onClick={() => void setAdminUserActive(target)}
+                            >{updatingAdminUserId === target.id ? 'Saving…' : target.isActive ? 'Deactivate' : 'Reactivate'}</button>
+                          ) : <span className="dfm-admin-protected-note">Protected</span>}
+                        </article>
+                      ))}
+                    </div>
+                    <div className="dfm-admin-pagination">
+                      <span>Page {adminPage} of {adminLastPage}</span>
+                      <div>
+                        <button type="button" className="dfm-dash-button dfm-dash-button-quiet" disabled={adminPage <= 1 || adminUsersLoading} onClick={() => setAdminPage((page) => Math.max(1, page - 1))}>Previous</button>
+                        <button type="button" className="dfm-dash-button dfm-dash-button-quiet" disabled={adminPage >= adminLastPage || adminUsersLoading} onClick={() => setAdminPage((page) => Math.min(adminLastPage, page + 1))}>Next</button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <EmptyState title="No accounts found" copy={adminSearch ? 'Try another name or email address.' : 'No user accounts have been registered yet.'} />
+                )}
+              </section>
+            </section>
           )}
 
           {!loading && view === 'categories' && (
@@ -824,7 +1003,7 @@ export default function DecisionDashboard() {
                     onChange={(event) => setSituation(event.target.value)}
                     placeholder="e.g. I want something easy after a long day"
                   />
-                  <small>The draw stays random. Gemini uses this context to write a short perspective; it is sent to Google and not stored.</small>
+                  <small>Pick for me draws randomly. You can also choose a different option yourself. Gemini uses this context to write a short perspective; it is sent to Google and not stored.</small>
                 </div>
                 {!data.categories.length && <EmptyState title="Start with a category" copy="Create a category before adding options and making your first decision." action="Create category" onAction={() => setEditor({ type: 'category' })} />}
                 {spinning ? <div className="dfm-app-thinking dfm-dashboard-thinking" role="status"><span /><span /><span /> We’re giving it a little thought…</div> : (
@@ -834,9 +1013,54 @@ export default function DecisionDashboard() {
                   <>
                     <div className="dfm-dash-picked-result" aria-live="polite">
                       <span className="dfm-dash-picked-spark"><Sparkles size={18} /></span>
-                      <div className="dfm-dash-picked-copy"><small>{favoritesOnly ? 'YOUR FAVORITES HAD THE ANSWER' : `THE PICK FROM ${selectedCategory?.name?.toUpperCase() ?? 'YOUR OPTIONS'}`}</small><strong>{resultOption.name}</strong><span>{lastDecisionMessage} {resultHistoryId ? 'Saved to your history.' : 'Could not save this decision.'}</span></div>
-                      {resultHistoryId && <div className="dfm-dash-picked-actions"><button type="button" onClick={() => setHistoryStatus(resultHistoryId, 'completed')}><CheckCircle2 size={15} /> Done</button><button type="button" onClick={() => setHistoryStatus(resultHistoryId, 'skipped')}><ArrowDownRight size={15} /> Skip</button><button type="button" onClick={() => startDecision(favoritesOnly ? data.options : activeOptions, selectedCategory, favoritesOnly)}><Shuffle size={15} /> Reroll</button></div>}
+                      <div className="dfm-dash-picked-copy"><small>{favoritesOnly ? 'YOUR FAVORITES HAD THE ANSWER' : `THE PICK FROM ${selectedCategory?.name?.toUpperCase() ?? 'YOUR OPTIONS'}`}</small><strong>{resultOption.name}</strong><span>{lastDecisionMessage} {resultHistoryId ? `Status: ${({ pending: 'Pending', completed: 'Done', skipped: 'Skipped' } as const)[data.history.find((entry) => entry.id === resultHistoryId)?.status ?? 'pending']}.` : 'Could not save this decision.'}</span></div>
+                      {resultHistoryId && (
+                        <div className="dfm-dash-picked-actions">
+                          <button
+                            type="button"
+                            className={data.history.find((entry) => entry.id === resultHistoryId)?.status === 'completed' ? 'is-active' : ''}
+                            aria-pressed={data.history.find((entry) => entry.id === resultHistoryId)?.status === 'completed'}
+                            disabled={updatingHistory?.id === resultHistoryId}
+                            onClick={() => void setHistoryStatus(resultHistoryId, 'completed')}
+                          ><CheckCircle2 size={15} /> {updatingHistory?.id === resultHistoryId && updatingHistory.status === 'completed' ? 'Saving…' : 'Done'}</button>
+                          <button
+                            type="button"
+                            className={data.history.find((entry) => entry.id === resultHistoryId)?.status === 'skipped' ? 'is-active' : ''}
+                            aria-pressed={data.history.find((entry) => entry.id === resultHistoryId)?.status === 'skipped'}
+                            disabled={updatingHistory?.id === resultHistoryId}
+                            onClick={() => void setHistoryStatus(resultHistoryId, 'skipped')}
+                          ><ArrowDownRight size={15} /> {updatingHistory?.id === resultHistoryId && updatingHistory.status === 'skipped' ? 'Saving…' : 'Skip'}</button>
+                          <button
+                            type="button"
+                            disabled={spinning || replacingDecision || updatingHistory?.id === resultHistoryId}
+                            aria-expanded={choosingAnother}
+                            onClick={() => setChoosingAnother((current) => !current)}
+                          >{choosingAnother ? 'Cancel' : 'Choose another'}</button>
+                        </div>
+                      )}
                     </div>
+                    {choosingAnother && resultHistoryId && (
+                      <div className="dfm-dash-alternatives" aria-label="Choose a different option">
+                        <strong>Choose a different option</strong>
+                        {(favoritesOnly ? data.options.filter((option) => option.isFavorite && !option.isExcluded) : eligibleActiveOptions)
+                          .filter((option) => option.id !== resultOption.id)
+                          .map((option) => (
+                            <button
+                              type="button"
+                              key={option.id}
+                              disabled={replacingDecision}
+                              onClick={() => void chooseAlternative(option)}
+                            >
+                              {option.name}<ArrowRight size={14} />
+                            </button>
+                          ))}
+                        {(favoritesOnly ? data.options.filter((option) => option.isFavorite && !option.isExcluded) : eligibleActiveOptions)
+                          .filter((option) => option.id !== resultOption.id).length === 0 && (
+                          <span>No other available options.</span>
+                        )}
+                        {replacingDecision && <span role="status">Saving your choice…</span>}
+                      </div>
+                    )}
                     <div className="dfm-dash-ai-reason" aria-live="polite">
                       <div><Sparkles size={15} /><strong>A thought on this choice</strong></div>
                       {reasonLoadingId === resultHistoryId && <p role="status">Asking Gemini for a short perspective…</p>}
@@ -847,7 +1071,7 @@ export default function DecisionDashboard() {
                           <button type="button" onClick={() => void requestAiReason(resultHistoryId, situation.trim())}>Try again</button>
                         </div>
                       )}
-                      <small>The option was chosen randomly; AI only adds a perspective and does not decide for you.</small>
+                      <small>{lastDecisionMessage === 'You chose another option.' ? 'You chose this option yourself. AI only adds a perspective and does not decide for you.' : 'The option was chosen randomly; AI only adds a perspective and does not decide for you.'}</small>
                     </div>
                   </>
                 )}

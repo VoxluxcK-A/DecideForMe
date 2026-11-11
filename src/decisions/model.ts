@@ -42,4 +42,4 @@ export interface DecisionDataResult {
   warning: string | null;
 }
 
-export type DecisionView = 'overview' | 'decide' | 'categories' | 'options' | 'favorites' | 'history';
+export type DecisionView = 'overview' | 'decide' | 'categories' | 'options' | 'favorites' | 'history' | 'admin';

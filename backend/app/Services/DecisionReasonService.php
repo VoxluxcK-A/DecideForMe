@@ -46,10 +46,15 @@ class DecisionReasonService
 
         if ($response->failed()) {
             Log::warning('Gemini decision reason request failed.', ['status' => $response->status()]);
+            $message = match ($response->status()) {
+                401 => 'Gemini rejected the API key. Check GEMINI_API_KEY in the backend environment, then clear Laravel config cache and restart the server.',
+                403 => 'Gemini denied access to this API key or project. Check the key and Gemini API access in Google AI Studio.',
+                429 => 'The AI service is busy. Please try again in a moment.',
+                default => 'The AI service could not generate a reason. Please try again.',
+            };
+
             throw new DecisionReasonException(
-                $response->status() === 429
-                    ? 'The AI service is busy. Please try again in a moment.'
-                    : 'The AI service could not generate a reason. Please try again.',
+                $message,
                 $response->status() === 429 ? 503 : 502,
             );
         }

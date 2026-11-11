@@ -13,6 +13,7 @@
 | Database | PostgreSQL |
 | Autentikasi | Session-based SPA authentication dengan Laravel Sanctum |
 | AI | Google Gemini API, dipanggil dari backend secara opsional |
+| Role | Pengunjung, pengguna terdaftar, dan admin |
 | Dokumentasi instalasi | [README.md](./README.md) |
 | Repository GitHub | Tambahkan URL repository proyek setelah tersedia |
 
@@ -38,13 +39,15 @@ Decide For Me menyediakan tempat untuk menyimpan pilihan, memilih salah satu ops
 **Kebutuhan fungsional**
 
 1. Pengguna dapat mendaftar, masuk, dan keluar dari akun.
-2. Pengguna dapat membuat, melihat, mengubah, dan menghapus kategori.
-3. Pengguna dapat mengelola opsi di dalam kategori.
-4. Pengguna dapat memilih kategori atau menggunakan opsi favorit untuk pengundian.
-5. Sistem memilih opsi secara acak dari opsi yang tersedia dan tidak dikecualikan.
-6. Sistem menyimpan keputusan ke riwayat dan pengguna dapat mengubah statusnya.
-7. Pengguna dapat meminta alasan AI untuk keputusan yang sudah dibuat.
-8. Pengguna dapat mencari, memfilter, dan mengurutkan data yang tersedia di aplikasi.
+2. Pengguna dapat meminta tautan reset password ke email akunnya.
+3. Pengguna dapat membuat, melihat, mengubah, dan menghapus kategori.
+4. Pengguna dapat mengelola opsi di dalam kategori.
+5. Pengguna dapat memilih kategori atau menggunakan opsi favorit untuk pengundian.
+6. Sistem memilih opsi secara acak dari opsi yang tersedia dan tidak dikecualikan.
+7. Sistem menyimpan keputusan ke riwayat dan pengguna dapat mengubah statusnya.
+8. Pengguna dapat meminta alasan AI untuk keputusan yang sudah dibuat.
+9. Pengguna dapat mencari, memfilter, dan mengurutkan data yang tersedia di aplikasi.
+10. Admin dapat melihat daftar akun serta mengaktifkan atau menonaktifkan akun pengguna.
 
 **Kebutuhan nonfungsional**
 
@@ -71,34 +74,33 @@ Decide For Me menyediakan tempat untuk menyimpan pilihan, memilih salah satu ops
 
 ### 3.2 Di luar implementasi saat ini
 
-- **Role admin dan dashboard admin belum tersedia.**
-- **Daftar akun seluruh pengguna untuk admin belum tersedia.**
-- Aplikasi belum memiliki endpoint atau tampilan untuk admin mengelola akun pengguna.
 - AI tidak membuat atau menyimpan opsi secara otomatis.
 - AI tidak memilih hasil undian; hasil dipilih secara acak oleh aplikasi sebelum alasan diminta.
 
-Fitur admin dapat dijadikan pengembangan berikutnya, tetapi tidak boleh dipresentasikan seolah-olah sudah berfungsi. Repository GitHub juga perlu ditautkan setelah URL repository proyek tersedia.
+Admin tidak mengakses data keputusan pribadi pengguna dan tidak dapat menonaktifkan akun admin dari panel user management. Repository GitHub perlu ditautkan setelah URL repository proyek tersedia.
 
 ## 4. Role dan Hak Akses
 
 | Role | Status | Hak akses |
 |---|---|---|
-| Pengunjung | Tersedia | Melihat landing page dan membuka halaman masuk/daftar. Data dashboard memerlukan autentikasi. |
-| Pengguna terdaftar | Tersedia | Mengelola kategori, opsi, favorit, pengecualian, undian, alasan AI, dan riwayat milik akunnya sendiri. |
-| Admin | Belum diimplementasikan | Belum ada hak akses khusus admin, daftar pengguna, atau dashboard admin. |
+| Pengunjung | Tersedia | Melihat landing page dan membuka halaman masuk/daftar/lupa password. Data dashboard memerlukan autentikasi. |
+| Pengguna terdaftar | Tersedia | Mengelola kategori, opsi, favorit, pengecualian, undian, alasan AI, dan riwayat milik akunnya sendiri; meminta reset password melalui email. |
+| Admin | Tersedia | Khusus mengelola akun: melihat daftar akun (nama, email, role, status, tanggal bergabung), mencari dan memaginasi akun, serta mengaktifkan/menonaktifkan user. Admin tidak dapat menggunakan fitur keputusan atau mengakses kategori, opsi, konteks AI, dan riwayat keputusan. Akun admin dilindungi agar tidak dapat dinonaktifkan dari daftar. |
 
-Backend memakai autentikasi dan pemeriksaan kepemilikan data untuk melindungi data pengguna. Akun yang berhasil masuk tetap berperan sebagai pengguna biasa; tidak ada akun admin bawaan pada implementasi saat ini.
+Backend memeriksa autentikasi dan role pada setiap endpoint admin. Pengguna yang dinonaktifkan tidak dapat masuk atau mengakses endpoint yang memerlukan akun aktif. Registrasi publik selalu menghasilkan role user; role tidak bisa dipilih dari form.
 
-### Usulan hak akses admin untuk pengembangan lanjutan
+### Menyiapkan akun admin
 
-Apabila fitur admin menjadi persyaratan, role admin perlu dirancang dan ditambahkan secara eksplisit, misalnya:
+1. Daftarkan akun yang akan dijadikan admin melalui `/register`.
+2. Dari folder `backend`, jalankan:
 
-- Melihat daftar akun dan status akun.
-- Menonaktifkan atau mengaktifkan akun sesuai kebijakan.
-- Melihat ringkasan operasional yang tidak membocorkan konteks pribadi atau API key.
-- Tidak membaca konteks AI pribadi pengguna kecuali ada persetujuan dan dasar kebutuhan yang jelas.
+   ```sh
+   php artisan app:promote-admin admin@example.com
+   ```
 
-Implementasi lanjutan harus menambahkan penyimpanan role, middleware/policy backend, validasi akses di API, dan pengujian akses. Menyembunyikan tombol di frontend saja tidak cukup untuk mengamankan halaman admin.
+3. Konfirmasi promosi akun di terminal, lalu login dan buka `/admin` atau menu **User management**.
+
+Perintah hanya mempromosikan akun yang sudah terdaftar; tidak ada password admin bawaan atau kredensial privileged di source code.
 
 ## 5. Fitur Utama dan Alur Pengguna
 
@@ -108,6 +110,8 @@ Implementasi lanjutan harus menambahkan penyimpanan role, middleware/policy back
 - Pengguna yang sudah memiliki akun dapat masuk melalui `/login`.
 - Setelah autentikasi, session dikelola oleh Laravel Sanctum.
 - Pengguna dapat keluar melalui aksi sign out.
+- Tautan **Forgot your password?** mengirim reset link ke email yang dimasukkan jika akun tersebut terdaftar. Respons tetap generik agar keberadaan email tidak bocor.
+- Token reset berlaku 60 menit dan hanya dapat digunakan sekali. Reset membutuhkan mail provider yang dikonfigurasi; `MAIL_MAILER=log` hanya menulis email ke log lokal.
 
 ### 5.2 Kategori dan Opsi
 
@@ -136,6 +140,13 @@ Implementasi lanjutan harus menambahkan penyimpanan role, middleware/policy back
 - Jika key belum diatur, model gagal, atau layanan tidak dapat dijangkau, aplikasi menampilkan error yang sesuai dan keputusan acak tetap dapat digunakan.
 - Model default saat dokumen ini dibuat adalah `gemini-3.5-flash-lite`; nilai dapat diatur melalui `GEMINI_MODEL`.
 
+### 5.5 Lupa password
+
+- Form tersedia dari `/login` dan dapat diminta melalui `/forgot-password`.
+- Email reset dikirim ke alamat akun yang dimasukkan; tautan membuka `/reset-password` dengan token.
+- Laravel Password Broker memvalidasi token dan kedaluwarsanya sebelum menyimpan hash password baru.
+- Mailer contoh default adalah `log`; pengiriman ke inbox membutuhkan konfigurasi SMTP/provider dan `APP_URL` yang benar di environment server.
+
 ## 6. Flowchart
 
 ### 6.1 Alur aplikasi dan keputusan
@@ -144,26 +155,30 @@ Implementasi lanjutan harus menambahkan penyimpanan role, middleware/policy back
 flowchart TD
     A[Pengunjung membuka /home] --> B{Sudah masuk?}
     B -- Belum --> C[Daftar atau masuk]
-    C --> D[Laravel memvalidasi akun dan membuat session]
-    B -- Sudah --> E[Buka dashboard /decide]
-    D --> E
-    E --> F{Kategori atau favorit}
-    F --> G[Ambil opsi milik pengguna yang tidak dikecualikan]
-    G --> H{Ada opsi tersedia?}
-    H -- Tidak --> I[Tampilkan pesan opsi belum tersedia]
-    H -- Ya --> J[Backend memilih opsi secara acak]
-    J --> K[Simpan keputusan ke riwayat]
-    K --> L{Pengguna meminta alasan AI?}
-    L -- Tidak --> M[Tampilkan hasil keputusan]
-    L -- Ya --> N{GEMINI_API_KEY tersedia?}
-    N -- Tidak --> O[Tampilkan informasi AI belum dikonfigurasi]
-    N -- Ya --> P[Kirim pilihan dan konteks ke Gemini melalui backend]
-    P --> Q{Gemini berhasil?}
-    Q -- Tidak --> R[Tampilkan error; keputusan tetap tersimpan]
-    Q -- Ya --> S[Simpan dan tampilkan alasan pada riwayat]
-    O --> M
-    R --> M
-    S --> M
+    C --> D{Lupa password?}
+    D -- Ya --> E[Masukkan email akun dan kirim tautan reset]
+    E --> F[Validasi token dan simpan password baru]
+    F --> C
+    D -- Tidak --> G[Laravel memvalidasi akun dan membuat session]
+    B -- Sudah --> H[Buka dashboard /decide]
+    G --> H
+    H --> I{Role admin?}
+    I -- Ya --> J[Buka pengelolaan akun]
+    J --> K[Cari user dan aktifkan/nonaktifkan akun]
+    I -- Tidak --> L{Kategori atau favorit}
+    L --> M[Ambil opsi milik pengguna yang tidak dikecualikan]
+    M --> N{Ada opsi tersedia?}
+    N -- Tidak --> O[Tampilkan pesan opsi belum tersedia]
+    N -- Ya --> P[Backend memilih opsi secara acak]
+    P --> Q[Simpan keputusan ke riwayat]
+    Q --> R{Pengguna meminta alasan AI?}
+    R -- Tidak --> S[Tampilkan hasil keputusan]
+    R -- Ya --> T{GEMINI_API_KEY tersedia?}
+    T -- Tidak --> U[Tampilkan informasi AI belum dikonfigurasi]
+    T -- Ya --> V[Kirim pilihan dan konteks ke Gemini melalui backend]
+    V --> W{Gemini berhasil?}
+    W -- Tidak --> X[Tampilkan error; keputusan tetap tersimpan]
+    W -- Ya --> Y[Simpan dan tampilkan alasan pada riwayat]
 ```
 
 ### 6.2 Alur data dan keamanan
@@ -186,13 +201,15 @@ flowchart LR
 2. **Backend:** Laravel menangani autentikasi, validasi, aturan bisnis, pemeriksaan kepemilikan, dan integrasi Gemini.
 3. **Database:** PostgreSQL menyimpan akun, kategori, opsi, dan riwayat.
 4. **Autentikasi:** Sanctum memakai session untuk SPA; endpoint data privat berada di balik middleware autentikasi.
-5. **AI:** Server mengirim permintaan ke Gemini menggunakan key dari environment. Key tidak disertakan dalam kode atau bundle frontend.
+5. **Otorisasi admin:** role `user`/`admin` disimpan di database; endpoint pengelolaan akun dilindungi middleware admin. Admin hanya menerima data profil dasar dan status akun.
+6. **Reset password:** Laravel Password Broker membuat dan memvalidasi token sekali pakai; email dikirim melalui mailer yang dikonfigurasi.
+7. **AI:** Server mengirim permintaan ke Gemini menggunakan key dari environment. Key tidak disertakan dalam kode atau bundle frontend.
 
 Endpoint API utama mencakup registrasi/login, dashboard, kategori, opsi, favorit, pengundian, riwayat, dan permintaan alasan AI. Rute API lengkap dapat dilihat di [backend/routes/api.php](./backend/routes/api.php).
 
 ## 8. Panduan Presentasi Pra-UKS
 
-Sesuaikan nama presenter dan durasi dengan kebutuhan. Jangan menyebut fitur admin sebagai fitur yang sudah tersedia.
+Sesuaikan nama presenter dan durasi dengan kebutuhan. Pastikan fitur yang didemokan telah disiapkan dan diuji.
 
 ### 1. Salam dan pengenalan diri
 
@@ -213,7 +230,7 @@ Jelaskan secara singkat:
 - **Latar belakang:** pengguna terkadang kesulitan memilih di antara beberapa opsi sederhana.
 - **Manfaat:** aplikasi menyimpan opsi dan memilih satu secara acak sehingga proses memilih lebih praktis.
 - **Ruang lingkup:** akun pengguna, kategori, opsi, favorit, pengundian, riwayat, dan alasan AI opsional.
-- **Role saat ini:** pengunjung dan pengguna terdaftar. Role admin belum tersedia pada versi ini.
+- **Role saat ini:** pengunjung, pengguna terdaftar, dan admin. Admin hanya mengelola akun dan tidak memiliki akses ke fitur keputusan atau data keputusan.
 
 ### 4. Demo website dinamis
 
@@ -226,7 +243,8 @@ Urutan demo yang disarankan:
 5. Tunjukkan favorit dan cara mengecualikan opsi.
 6. Jalankan pengundian, lalu tunjukkan hasil dan riwayat/status keputusan.
 7. Jika Gemini sudah dikonfigurasi, tunjukkan permintaan alasan AI dan jelaskan bahwa AI hanya memberi perspektif. Jika belum, jelaskan bahwa AI opsional dan jangan mengklaim hasil AI berhasil.
-8. Jelaskan batasan versi dengan jujur: daftar pengguna dan fitur admin belum diimplementasikan. Tawarkan sebagai pengembangan berikutnya, bukan sebagai bagian demo yang sudah berfungsi.
+8. Jika presentasi mencakup admin, masuk menggunakan akun yang telah dipromosikan dengan `app:promote-admin`, kemudian tunjukkan daftar user, pencarian, serta aktivasi/nonaktivasi akun. Admin tidak menggunakan fitur pengambilan keputusan.
+9. Tunjukkan lupa password. Jika SMTP belum diatur, jelaskan bahwa mode lokal mencatat email ke log dan jangan klaim email sudah diterima inbox.
 
 ### 5. Testing kinerja web
 
@@ -273,6 +291,21 @@ Frontend mengirim permintaan terautentikasi ke Laravel. Backend mengambil opsi y
 **Bagaimana data antar pengguna dipisahkan?**  
 Backend mengharuskan autentikasi dan memeriksa kepemilikan data sebelum mengakses atau mengubah kategori, opsi, dan riwayat.
 
+**Admin bisa memakai fitur keputusan juga?**  
+Tidak. Admin dibatasi untuk pengelolaan akun. Endpoint fitur keputusan dan data kategori/opsi ditolak untuk role admin; pengguna biasa tetap memakai fitur keputusan seperti sebelumnya.
+
+**Apa tujuan fitur admin?**  
+Admin dapat melihat nama, email, role, status, dan tanggal pendaftaran akun; mencari akun; serta mengaktifkan atau menonaktifkan akun user. Pengelolaan akun dipisahkan dari data keputusan pribadi untuk menjaga privasi.
+
+**Bagaimana akun admin dibuat?**  
+Daftarkan akun terlebih dahulu, lalu jalankan `php artisan app:promote-admin alamat@email` dari folder `backend` dan konfirmasi promosi di terminal.
+
+**Bagaimana fitur lupa password bekerja?**  
+Pengguna memasukkan email akun di `/forgot-password`. Laravel mengirim token reset sekali pakai ke email tersebut melalui mailer yang dikonfigurasi. Tautan berlaku 60 menit dan form `/reset-password` mengirim token, email, serta password baru ke backend untuk divalidasi.
+
+**Apakah email pasti terkirim pada konfigurasi lokal?**  
+Tidak jika `MAIL_MAILER=log`; konfigurasi itu hanya menulis email ke log. Pengiriman ke inbox perlu kredensial SMTP/provider yang valid dan `APP_URL` yang sesuai di environment backend.
+
 **Bagaimana AI bekerja?**  
 AI dipanggil setelah opsi dipilih. Server mengirim nama kategori, opsi terpilih, dan konteks opsional ke Gemini. AI menghasilkan alasan singkat; ia tidak menentukan hasil acak.
 
@@ -307,6 +340,8 @@ Konteks opsional dikirim ke Google Gemini untuk membuat alasan dan tidak disimpa
 
 - [ ] Pastikan server frontend, backend, dan database berjalan.
 - [ ] Siapkan akun demo dan data contoh yang tidak berisi informasi pribadi.
+- [ ] Jika mendemokan admin, jalankan `php artisan app:promote-admin email-demo` untuk akun demo dan uji `/admin`.
+- [ ] Jika mendemokan lupa password, konfigurasi SMTP/provider dan pastikan tautan reset diterima di inbox; `MAIL_MAILER=log` tidak mengirim email sungguhan.
 - [ ] Pastikan akun dapat masuk dan membuka dashboard.
 - [ ] Periksa alur kategori, opsi, favorit, pengecualian, pengundian, dan riwayat.
 - [ ] Jika mendemokan AI, pastikan `GEMINI_API_KEY` tersedia di environment backend dan permintaan AI berhasil. Jangan tampilkan nilainya.

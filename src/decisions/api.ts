@@ -4,6 +4,18 @@ export interface AuthUser {
   id: number;
   name: string;
   email: string;
+  role: 'user' | 'admin';
+  isAdmin: boolean;
+  isActive: boolean;
+}
+
+export interface AdminUser {
+  id: number;
+  name: string;
+  email: string;
+  role: 'user' | 'admin';
+  isActive: boolean;
+  createdAt: string;
 }
 
 export interface ApiPage<T> {
@@ -156,6 +168,41 @@ export const decisionApi = {
     await request('/api/logout', { method: 'POST' });
   },
 
+  async requestPasswordReset(email: string): Promise<string> {
+    const response = await request<{ message: string }>('/api/password/forgot', {
+      method: 'POST',
+      body: jsonBody({ email }),
+    });
+    return response.message;
+  },
+
+  async resetPassword(email: string, token: string, password: string, passwordConfirmation: string): Promise<string> {
+    const response = await request<{ message: string }>('/api/password/reset', {
+      method: 'POST',
+      body: jsonBody({
+        email,
+        token,
+        password,
+        password_confirmation: passwordConfirmation,
+      }),
+    });
+    return response.message;
+  },
+
+  async adminUsers(search: string, page = 1): Promise<ApiPage<AdminUser>> {
+    const params = new URLSearchParams({ page: String(page), per_page: '50' });
+    if (search.trim()) params.set('search', search.trim());
+    return request<ApiPage<AdminUser>>(`/api/admin/users?${params.toString()}`);
+  },
+
+  async setAdminUserActive(id: number, isActive: boolean): Promise<AdminUser> {
+    const response = await request<{ data: AdminUser }>(`/api/admin/users/${id}/status`, {
+      method: 'PATCH',
+      body: jsonBody({ is_active: isActive }),
+    });
+    return response.data;
+  },
+
   async createCategory(name: string, description: string) {
     const response = await request<{ data: DecisionData['categories'][number] }>('/api/categories', {
       method: 'POST',
@@ -218,6 +265,17 @@ export const decisionApi = {
       method: 'POST',
       body: jsonBody({ category_id: categoryId, favorites_only: favoritesOnly }),
     });
+    return response.data;
+  },
+
+  async replaceDecision(id: string, optionId: string, favoritesOnly: boolean): Promise<RandomDecision & { replacedHistory: DecisionHistory }> {
+    const response = await request<{ data: RandomDecision & { replacedHistory: DecisionHistory } }>(
+      `/api/decisions/history/${encodeURIComponent(id)}/replace`,
+      {
+        method: 'POST',
+        body: jsonBody({ option_id: optionId, favorites_only: favoritesOnly }),
+      },
+    );
     return response.data;
   },
 

@@ -79,6 +79,7 @@ export default function AuthPage({ mode }: { mode: 'login' | 'register' }) {
             {isRegister ? 'Already have a space?' : 'New to Decide For Me?'}{' '}
             <a href={isRegister ? '/login' : '/register'}>{isRegister ? 'Sign in' : 'Create an account'} <ArrowUpRight size={13} /></a>
           </p>
+          {!isRegister && <a className="dfm-auth-forgot" href="/forgot-password">Forgot your password?</a>}
         </section>
       </div>
       <footer className="dfm-app-footer"><span>Decide For Me<span className="dfm-dot">.</span></span><span>Your choices stay yours.</span></footer>
